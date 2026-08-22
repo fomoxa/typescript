@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# This repository builds and tests on its own: Node and nothing else. The
+# package has no runtime dependency, and the test suite needs no build step
+# because Node runs the TypeScript sources directly - the compiler is only
+# here to emit dist/ and to prove the published types resolve.
+jobs:
+  test:
+    name: test (node ${{ matrix.node }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # No lockfile is committed and there is nothing to install for the
+      # library itself, so this only pulls the compiler.
+      - run: npm install
+
+      - name: test
+        run: npm test
+
+      - name: typecheck and build
+        run: npm run build
+
+      # The examples are the shortest thing a newcomer copies, so they are
+      # checked rather than trusted.
+      - name: examples typecheck
+        run: npm run check:examples
