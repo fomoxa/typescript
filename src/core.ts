@@ -88,7 +88,7 @@ export class Core {
         if (payload.length > this.config.maxMessageBytes) {
             return "too-large";
         }
-        // ③ a frame still stuck means refuse — never queue. Cyclone would
+        // ③ a frame still stuck means refuse — never queue. Fomoxa would
         //    rather the application know than let memory climb quietly
         //    (01 §5).
         if (this.outbox.length > 0) {
@@ -155,8 +155,7 @@ export class Core {
 
         // ── 4. transport died while the session was still open ──
         if (this.dead !== null && this.session.currentState !== "closed") {
-            const reason = this.dead === "peer-closed" ? "peer-closed" : "transport-error";
-            this.apply(this.session.transportClosed(reason), events);
+            this.apply(this.session.transportClosed(this.dead), events);
         }
 
         // ── 5. hand the list to the application ──
@@ -288,7 +287,10 @@ export class Core {
 
     private queue(bytes: Uint8Array): void {
         if (this.outbox.length >= MAX_OUTBOX_FRAMES) {
-            this.dead = "transport-error";
+            // The peer stopped reading, which is the same "not keeping up" a
+            // heartbeat timeout reports. The transport itself is fine, so
+            // calling this a transport error would be untrue.
+            this.dead = "unresponsive";
             return;
         }
         this.outbox.push(bytes);

@@ -25,7 +25,7 @@ export const MAX_DATAGRAM = 65507;
  * 01 §6 requires an internal transport buffer to be bounded rather than grow
  * without limit, and for UDP dropping is the honest answer: the kernel does
  * exactly this when its receive buffer fills, and 01 §7 states plainly that
- * Cyclone neither retransmits nor reorders. The guide does not say which end
+ * Fomoxa neither retransmits nor reorders. The guide does not say which end
  * to drop; the oldest goes, because a real-time peer is better served by the
  * freshest data, and a lost handshake datagram simply fails the handshake
  * closed (02 §3.3.2).

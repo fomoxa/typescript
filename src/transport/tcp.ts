@@ -166,7 +166,7 @@ export class TcpListener implements Listener {
 }
 
 /**
- * Opening the pipe happens outside Cyclone and before the core starts
+ * Opening the pipe happens outside Fomoxa and before the core starts
  * (01 §4), which is where every await in this library lives. Once this
  * resolves, the tick loop is synchronous for the rest of the session.
  */

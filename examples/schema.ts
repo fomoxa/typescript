@@ -1,7 +1,7 @@
 import { buildSchema } from "../src/index.ts";
 
 /**
- * Stand-in fingerprints. A real project takes these from the tree `cyclonec`
+ * Stand-in fingerprints. A real project takes these from the tree `fomoxac`
  * generates: this SDK moves opaque bytes and never computes a fingerprint or
  * encodes a field itself.
  */

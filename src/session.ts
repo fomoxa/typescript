@@ -24,7 +24,7 @@ import {
 } from "./handshake.ts";
 import type { Schema } from "./schema.ts";
 import type { Config } from "./config.ts";
-import type { Event } from "./event.ts";
+import type { DisconnectReason, Event } from "./event.ts";
 
 export type Role = "client" | "server";
 export type State = "handshaking" | "ready" | "closed";
@@ -89,7 +89,7 @@ export class Session {
         this.ended = true;
     }
 
-    transportClosed(reason: "peer-closed" | "transport-error"): Reaction {
+    transportClosed(reason: DisconnectReason): Reaction {
         if (this.state === "closed") {
             return NOTHING;
         }

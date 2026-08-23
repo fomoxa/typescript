@@ -3,7 +3,7 @@ import { PLAYER_INPUT, SCHEMA } from "./schema.ts";
 
 const PORT = 9321;
 const server = await listen("127.0.0.1", PORT, SCHEMA);
-console.log(`cyclone-ts echo server on 127.0.0.1:${PORT}`);
+console.log(`fomoxa-ts echo server on 127.0.0.1:${PORT}`);
 
 setInterval(() => {
     for (const event of server.tick(nowMs())) {

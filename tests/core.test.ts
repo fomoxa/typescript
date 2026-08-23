@@ -253,3 +253,26 @@ test("closing releases the transport exactly once", () => {
     core.release();
     assert.equal(transport.hardClosed, 1);
 });
+
+// 02 §8: the pending queue must have a ceiling. A peer that probes every tick
+// while never reading keeps our silence clock alive, so the heartbeat never
+// ends the session - only the ceiling does. The reason is "unresponsive", not
+// "transport-error": the link is fine, the peer is simply not keeping up.
+test("a blocked link plus a peer probing every tick stops at the outbox ceiling", () => {
+    const transport = new FakeTransport();
+    const core = readyClient(transport);
+    transport.sendAnswer = "would-block";
+
+    const events: { kind: string }[] = [];
+    for (let tick = 0; tick < 10_000; tick += 1) {
+        transport.queue(encodeProbe());
+        events.push(...core.tick(tick));
+        if (events.some((event) => event.kind === "disconnected")) {
+            break;
+        }
+    }
+
+    const endings = events.filter((event) => event.kind === "disconnected");
+    assert.equal(endings.length, 1, "exactly one termination event");
+    assert.deepEqual(endings[0], { kind: "disconnected", reason: "unresponsive" });
+});

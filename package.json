@@ -1,7 +1,7 @@
 {
-  "name": "cyclone-net",
+  "name": "fomoxa-net",
   "version": "0.1.0",
-  "description": "The Cyclone runtime for Node: framing, schema handshake, heartbeat and a non-blocking TCP/UDP tick loop. Codecs come from cyclonec.",
+  "description": "The Fomoxa runtime for Node: framing, schema handshake, heartbeat and a non-blocking TCP/UDP tick loop. Codecs come from fomoxac.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -31,11 +31,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/cyclone-protocol/cyclone-ts"
+    "url": "https://github.com/fomoxa/cyclone-ts"
   },
-  "homepage": "https://cyclone-protocol.github.io",
+  "homepage": "https://fomoxa.github.io",
   "keywords": [
-    "cyclone",
+    "fomoxa",
     "protocol",
     "binary",
     "networking",

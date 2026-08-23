@@ -1,12 +1,12 @@
-# cyclone-net
+# fomoxa-net
 
-The Cyclone runtime for Node: framing, schema handshake, heartbeat, and a
+The Fomoxa runtime for Node: framing, schema handshake, heartbeat, and a
 non-blocking tick loop over TCP or UDP.
 
 No dependencies. No hidden threads of execution. No `async` anywhere past the
 moment the pipe is open — your loop drives everything.
 
-Codecs come from `cyclonec`. This package moves opaque bytes and never
+Codecs come from `fomoxac`. This package moves opaque bytes and never
 interprets one.
 
 ---
@@ -14,7 +14,7 @@ interprets one.
 ## Install
 
 ```
-npm install cyclone-net
+npm install fomoxa-net
 ```
 
 Node 22 or newer. The published package ships compiled JavaScript with `.d.ts`
@@ -28,10 +28,10 @@ CommonJS does not say so:
 
 ```
 Error [ERR_PACKAGE_PATH_NOT_EXPORTED]:
-No "exports" main defined in .../node_modules/cyclone-net/package.json
+No "exports" main defined in .../node_modules/fomoxa-net/package.json
 ```
 
-`import` from an ESM module, or `await import("cyclone-net")` from CommonJS.
+`import` from an ESM module, or `await import("fomoxa-net")` from CommonJS.
 Watch out for the second one under TypeScript: with `"module": "commonjs"`,
 `tsc` rewrites `await import(...)` into `require(...)`, which produces exactly
 the message above even though the source looked like a dynamic import. Setting
@@ -42,11 +42,11 @@ the message above even though the source looked like a dynamic import. Setting
 ## Client
 
 ```ts
-import { connect, nowMs } from "cyclone-net";
+import { connect, nowMs } from "fomoxa-net";
 import { SCHEMA, PLAYER_INPUT } from "./schema.js";
 
 // Opening the pipe is the one asynchronous step, and it happens before
-// Cyclone starts. Everything after this is synchronous.
+// Fomoxa starts. Everything after this is synchronous.
 const client = await connect("127.0.0.1", 9321, SCHEMA);
 
 setInterval(() => {
@@ -77,7 +77,7 @@ setInterval(() => {
 ## Server
 
 ```ts
-import { listen, nowMs } from "cyclone-net";
+import { listen, nowMs } from "fomoxa-net";
 
 const server = await listen("127.0.0.1", 9321, SCHEMA);
 
@@ -98,13 +98,13 @@ Every server event carries the `peer` it belongs to. `broadcast`, `disconnect`,
 Same session, same events, same loop — only the entry point changes.
 
 ```ts
-import { connectUdpSession, listenUdpServer } from "cyclone-net";
+import { connectUdpSession, listenUdpServer } from "fomoxa-net";
 
 const server = await listenUdpServer("127.0.0.1", 9321, SCHEMA);
 const client = await connectUdpSession("127.0.0.1", 9321, SCHEMA);
 ```
 
-Datagrams may be lost, arrive out of order, or arrive twice. Cyclone hands them
+Datagrams may be lost, arrive out of order, or arrive twice. Fomoxa hands them
 up **in the order it received them** and repairs nothing — that trade is
 deliberate, since a game would usually rather lose a position update than wait
 for a retransmit. Heartbeat and dead-peer detection still work, because they
@@ -164,26 +164,26 @@ one of those can drop its defensive copies here.
 
 ---
 
-## Codecs from cyclonec need a build step
+## Codecs from fomoxac need a build step
 
 This package moves opaque bytes; the codecs that turn your models into those
-bytes come from `cyclonec`. Point it at your annotated sources and it writes a
+bytes come from `fomoxac`. Point it at your annotated sources and it writes a
 tree — `runtime.ts`, `handshake.ts`, and one file per model per codec:
 
 ```
-cyclonec generate --src src/models --out src/generated
+fomoxac generate --src src/models --out src/generated
 ```
 
 Build the schema for this SDK straight out of that tree, so no fingerprint is
 ever copied by hand:
 
 ```ts
-import { CYCLONE_MESSAGES, CYCLONE_SCHEMA_FINGERPRINT } from "./generated/handshake.js";
-import { buildSchema } from "cyclone-net";
+import { FOMOXA_MESSAGES, FOMOXA_SCHEMA_FINGERPRINT } from "./generated/handshake.js";
+import { buildSchema } from "fomoxa-net";
 
 export const SCHEMA = buildSchema(
-    CYCLONE_SCHEMA_FINGERPRINT,
-    CYCLONE_MESSAGES.map((m) => ({ id: m.id, fingerprint: m.fingerprint, prefixes: m.prefixes })),
+    FOMOXA_SCHEMA_FINGERPRINT,
+    FOMOXA_MESSAGES.map((m) => ({ id: m.id, fingerprint: m.fingerprint, prefixes: m.prefixes })),
 );
 ```
 
@@ -196,12 +196,12 @@ generated code is compiled rather than executed as-is.
 This is worth stating plainly because the SDK itself is the opposite: its
 sources stay inside the type-stripping subset and its own test suite runs with
 no build at all. That difference belongs to the generated code, not to
-`cyclone-net`, and it surprises people who notice one and assume the other.
+`fomoxa-net`, and it surprises people who notice one and assume the other.
 
 ## Development
 
 ```
-npm test           # 73 tests, no build step — Node runs the TypeScript directly
+npm test           # 74 tests, no build step — Node runs the TypeScript directly
 npm run build      # emit dist/ with .d.ts
 node examples/echo-server.ts
 node examples/echo-client.ts
@@ -213,7 +213,7 @@ without compiling anything first.
 
 ## Behaviour, and where it comes from
 
-This package was written from the Cyclone implementation guide and the
+This package was written from the Fomoxa implementation guide and the
 protocol RFCs, not by porting another SDK. The guide states that reading it is
 enough to rebuild an SDK in any language without reading any existing
 implementation's source, and that is how this one was built. Comments through
