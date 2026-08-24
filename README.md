@@ -1,8 +1,8 @@
-# fomoxa-net
+# @fomoxa/net
 
 ## 1. Overview
 
-`fomoxa-net` is the Node.js runtime implementation of the Fomoxa protocol, written in TypeScript.
+`@fomoxa/net` is the Node.js runtime implementation of the Fomoxa protocol, written in TypeScript.
 It implements framing, the schema handshake, heartbeat, and a non-blocking TCP/UDP tick loop, as defined by the Fomoxa implementation guide.
 The package requires Node.js 22 or newer (`engines.node: ">=22"` in `package.json`) and declares no runtime dependency; `typescript` and `@types/node` are development-only dependencies used to type-check and build the package, and do not reach a consumer.
 The package contains no wire-format codec, no background threads, and no `async`/`await` usage past the point where a transport finishes connecting.
@@ -40,7 +40,7 @@ No code in this repository inspects the content of a payload.
 
 ## 4. Installation
 
-This package is not currently published to the npm registry: a request to `https://registry.npmjs.org/fomoxa-net` returns `404 Not Found`, and the CI workflow (`.github/workflows/ci.yml`) runs `npm test`, `npm run build`, and `npm run check:examples` with no `npm publish` step.
+This package is not currently published to the npm registry: a request to `https://registry.npmjs.org/@fomoxa/net` returns `404 Not Found`, and the CI workflow (`.github/workflows/ci.yml`) runs `npm test`, `npm run build`, and `npm run check:examples` with no `npm publish` step.
 To use it, build it from source and reference it as a local or git dependency.
 
 ```sh
@@ -56,7 +56,7 @@ npm run build
 
 The package declares a single `exports` condition, `import`, and no `require` condition, so it is ESM-only.
 Reaching it with `require` or a non-dynamic `import` from CommonJS raises `ERR_PACKAGE_PATH_NOT_EXPORTED` rather than a message that names the real cause.
-A CommonJS consumer must use `await import("fomoxa-net")`, and under TypeScript with `"module": "commonjs"` that call must still resolve as a genuine dynamic import; `tsc` rewrites it into `require(...)` unless `"module"` is set to `"nodenext"` or another ESM-aware target.
+A CommonJS consumer must use `await import("@fomoxa/net")`, and under TypeScript with `"module": "commonjs"` that call must still resolve as a genuine dynamic import; `tsc` rewrites it into `require(...)` unless `"module"` is set to `"nodenext"` or another ESM-aware target.
 
 ## 5. Building From Source
 
@@ -75,7 +75,7 @@ The sources under `src/` stay inside the subset of TypeScript that Node's built-
 ### 6.1 Client
 
 ```ts
-import { connect, nowMs } from "fomoxa-net";
+import { connect, nowMs } from "@fomoxa/net";
 import { SCHEMA, PLAYER_INPUT } from "./schema.js";
 
 const client = await connect("127.0.0.1", 9321, SCHEMA);
@@ -110,7 +110,7 @@ A call to `send` before the connection reaches the `ready` state is refused with
 ### 6.2 Server
 
 ```ts
-import { listen, nowMs } from "fomoxa-net";
+import { listen, nowMs } from "@fomoxa/net";
 
 const server = await listen("127.0.0.1", 9321, SCHEMA);
 
@@ -137,7 +137,7 @@ node examples/echo-client.ts
 The client and server entry points differ by one call each; the code above them is unchanged, since both use the same `Connection` and `Server` classes and produce the same event set.
 
 ```ts
-import { connectUdpSession, listenUdpServer } from "fomoxa-net";
+import { connectUdpSession, listenUdpServer } from "@fomoxa/net";
 
 const server = await listenUdpServer("127.0.0.1", 9321, SCHEMA);
 const client = await connectUdpSession("127.0.0.1", 9321, SCHEMA);
@@ -154,7 +154,7 @@ The runtime does not compute a schema fingerprint.
 `buildSchema(fingerprint, messages)` takes the whole-schema fingerprint and, per message, its id, its own fingerprint, and its prefix-fingerprint chain (`prefixes`), and only compares these values during the handshake.
 
 ```ts
-import { buildSchema } from "fomoxa-net";
+import { buildSchema } from "@fomoxa/net";
 
 export const PLAYER_INPUT = 0x74fdfa74;
 

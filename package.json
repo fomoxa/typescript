@@ -1,9 +1,12 @@
 {
-  "name": "fomoxa-net",
+  "name": "@fomoxa/net",
   "version": "0.1.0",
   "description": "The Fomoxa runtime for Node: framing, schema handshake, heartbeat and a non-blocking TCP/UDP tick loop. Codecs come from fomoxac.",
   "license": "Apache-2.0",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=22"
   },
