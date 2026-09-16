@@ -4,12 +4,12 @@
 
 `@fomoxa/net` is the Node.js runtime implementation of the Fomoxa protocol, written in TypeScript.
 It implements framing, the schema handshake, heartbeat, and a non-blocking TCP/UDP tick loop, as defined by the Fomoxa implementation guide.
-The package requires Node.js 22 or newer (`engines.node: ">=22"` in `package.json`) and declares no runtime dependency; `typescript` and `@types/node` are development-only dependencies used to type-check and build the package, and do not reach a consumer.
+The package requires Node.js 22 or newer (`engines.node: ">=22"` in `package.json`) and declares no runtime dependency. `typescript` and `@types/node` are development dependencies, used to type-check and build the package, and never reach a consumer.
 The package contains no wire-format codec, no background threads, and no `async`/`await` usage past the point where a transport finishes connecting.
 
-## 2. Authoritative References
+## 2. Authoritative references
 
-The behavior of this library is defined by the Fomoxa protocol documents, not by this file.
+The Fomoxa protocol documents define the behavior of this library.
 Source comments throughout `src/` cite the specific section a rule comes from, using the implementation guide's own chapter numbers (for example `01 §3`, `02 §5.3`) and, where a rule traces to a conformance vector, the vector's identifier (for example `RFC-0003 §8.6 V-001`).
 
 | Document | Scope |
@@ -40,37 +40,36 @@ No code in this repository inspects the content of a payload.
 
 ## 4. Installation
 
-This package is not currently published to the npm registry: a request to `https://registry.npmjs.org/@fomoxa/net` returns `404 Not Found`, and the CI workflow (`.github/workflows/ci.yml`) runs `npm test`, `npm run build`, and `npm run check:examples` with no `npm publish` step.
-To use it, build it from source and reference it as a local or git dependency.
+The package is published on npm as [`@fomoxa/net`](https://www.npmjs.com/package/@fomoxa/net).
 
 ```sh
-git clone https://github.com/fomoxa/typescript.git
-cd typescript
-npm install
-npm run build
+npm install @fomoxa/net
 ```
 
-`npm run build` runs `tsc` and emits compiled JavaScript with `.d.ts` declarations into `dist/`, per the `exports` field in `package.json`.
+The published package ships compiled JavaScript with `.d.ts` declarations under `dist/`, per the `exports` field in `package.json`; it declares no runtime dependency and requires Node.js 22 or newer.
+To build it from source instead, see [Section 5](#5-building-from-source).
 
 ### 4.1 ESM only
 
 The package declares a single `exports` condition, `import`, and no `require` condition, so it is ESM-only.
-Reaching it with `require` or a non-dynamic `import` from CommonJS raises `ERR_PACKAGE_PATH_NOT_EXPORTED` rather than a message that names the real cause.
+Reaching it with `require` or a non-dynamic `import` from CommonJS raises `ERR_PACKAGE_PATH_NOT_EXPORTED`, an error that does not name the real cause.
 A CommonJS consumer must use `await import("@fomoxa/net")`, and under TypeScript with `"module": "commonjs"` that call must still resolve as a genuine dynamic import; `tsc` rewrites it into `require(...)` unless `"module"` is set to `"nodenext"` or another ESM-aware target.
 
-## 5. Building From Source
+## 5. Building from source
 
 ```sh
+git clone https://github.com/fomoxa/typescript.git
+cd typescript
 npm install
 npm test           # node --test "tests/*.test.ts", 74 tests, no build step
 npm run build       # tsc; emits dist/ with .d.ts
 npm run check:examples
 ```
 
-The sources under `src/` stay inside the subset of TypeScript that Node's built-in type stripping accepts directly (relative imports carry an explicit `.ts` extension, and the sources use no `enum`, no `namespace`, and no parameter properties), which is what lets `npm test` run the `.ts` test files with no compilation step.
+The sources under `src/` stay inside the subset of TypeScript that Node's built-in type stripping accepts directly (relative imports carry an explicit `.ts` extension, and the sources use no `enum`, no `namespace`, and no parameter properties), so `npm test` can run the `.ts` test files with no compilation step.
 `npm run build` performs the separate `tsc` invocation that emits `dist/` and its `.d.ts` declarations for consumers.
 
-## 6. Quick Start
+## 6. Quick start
 
 ### 6.1 Client
 
@@ -105,7 +104,7 @@ setInterval(() => {
 ```
 
 `connect(host, port, schema, config?)` opens the socket, which is the one asynchronous step in the whole session; every call after it, including `tick` and `send`, is synchronous.
-A call to `send` before the connection reaches the `ready` state is refused with `"not-ready"`; no application byte is written to the transport before both ends have confirmed they interpret the schema identically.
+A call to `send` before the connection reaches the `ready` state is refused with `"not-ready"`, and no application byte reaches the transport until both ends have confirmed that they read the schema the same way.
 
 ### 6.2 Server
 
@@ -134,7 +133,7 @@ node examples/echo-client.ts
 
 ### 6.3 UDP
 
-The client and server entry points differ by one call each; the code above them is unchanged, since both use the same `Connection` and `Server` classes and produce the same event set.
+Switching to UDP changes one call on the client and one on the server. The code above them stays the same, since both transports use the same `Connection` and `Server` classes and produce the same events.
 
 ```ts
 import { connectUdpSession, listenUdpServer } from "@fomoxa/net";
@@ -143,12 +142,12 @@ const server = await listenUdpServer("127.0.0.1", 9321, SCHEMA);
 const client = await connectUdpSession("127.0.0.1", 9321, SCHEMA);
 ```
 
-UDP does not guarantee delivery, ordering, or deduplication of datagrams, and this package does not add any of these guarantees; datagrams are delivered to the application in the order the socket received them.
-Heartbeat and dead-peer detection are unaffected, because they run on elapsed time rather than on sequence numbers.
-A single UDP datagram carries at most `MAX_DATAGRAM` (65,507) bytes of payload; a larger send is rejected with `"too-large"` rather than fragmented, and the session stays open.
+UDP does not guarantee delivery, ordering, or deduplication of datagrams, and this package adds none of these guarantees; datagrams reach the application in the order the socket received them.
+Heartbeat and dead-peer detection are unaffected, because elapsed time drives them and sequence numbers play no part.
+A single UDP datagram carries at most `MAX_DATAGRAM` (65,507) bytes of payload. A larger send is rejected with `"too-large"` without fragmenting it, and the session stays open.
 An endpoint queues at most `MAX_QUEUED_DATAGRAMS` (64) datagrams per peer, dropping the oldest once that fills, and tracks at most `MAX_TRACKED_PEERS` (1,024) distinct source addresses at once; a datagram from a new address past that limit is silently ignored.
 
-## 7. Schema Construction
+## 7. Schema construction
 
 The runtime does not compute a schema fingerprint.
 `buildSchema(fingerprint, messages)` takes the whole-schema fingerprint and, per message, its id, its own fingerprint, and its prefix-fingerprint chain (`prefixes`), and only compares these values during the handshake.
@@ -167,7 +166,7 @@ export const SCHEMA = buildSchema(0xbd60379718901aa5n, [
 ]);
 ```
 
-These values are meant to come from the tree `fomoxac` generates for a project, not to be written by hand; `examples/schema.ts` uses stand-in constants for illustration only.
+These values should come from the tree `fomoxac` generates for a project; `examples/schema.ts` uses stand-in constants for illustration only.
 `buildSchema` throws `SchemaError` if messages are not sorted by id without duplicates, if a message declares more than 65,535 fields, or if a message's last prefix does not equal its own fingerprint.
 
 Two peers running schemas that differ can still connect, provided every message declared by both sides agrees on the fields both sides carry.
@@ -182,7 +181,7 @@ Two peers running schemas that differ can still connect, provided every message 
 
 The last row is the only failure, because the same field index would carry two meanings, and the index is the only identifier a field has on the wire.
 
-## 8. Configuration Defaults
+## 8. Configuration defaults
 
 `defaultConfig()` (from `src/config.ts`) returns the following.
 
@@ -195,23 +194,23 @@ The last row is the only failure, because the same field index would carry two m
 | `maxMessageBytes` | 65,536 (64 KiB) | Maximum payload size accepted for one message |
 | `maxPeers` | 256 | Maximum number of simultaneous peers a `Server` accepts |
 
-A probe is sent only after a period of silence, not on a fixed timer, so a link carrying regular traffic produces no heartbeat frames.
-A peer is not disconnected without first being probed, so the worst-case time to notice a dead peer while `ready` is `heartbeatIntervalMs + heartbeatTimeoutMs` — 20 seconds with the defaults above.
+A probe is sent only after a period of silence, never on a fixed timer, so a link carrying regular traffic produces no heartbeat frames.
+No peer is disconnected without first being probed, so the longest time to notice a dead peer while `ready` is `heartbeatIntervalMs + heartbeatTimeoutMs`: 20 seconds with the defaults above.
 
 ## 9. Timekeeping
 
-`tick(now?)` on both `Connection` and `Server` accepts the current instant as an optional parameter; the session reads no system or wall clock on its own when a caller supplies one, which makes timeout and expiry behavior testable without waiting in real time.
+`tick(now?)` on both `Connection` and `Server` accepts the current instant as an optional parameter. When the caller supplies it, the session reads no system or wall clock, so timeout and expiry behavior can be tested without waiting in real time.
 When `now` is omitted, it defaults to `nowMs()`.
-`nowMs()` (`src/clock.ts`) returns `performance.now()`, a monotonic clock, never `Date.now()`, so a system clock adjustment cannot expire a handshake in flight or terminate a healthy connection.
+`nowMs()` (`src/clock.ts`) returns `performance.now()`, a monotonic clock, and never `Date.now()`, so a change to the system clock cannot expire a handshake in flight or end a healthy connection.
 
-## 10. Payload Lifetime
+## 10. Payload lifetime
 
 `event.payload`, for a `message` event, is a `Uint8Array` this package owns and hands to the application.
-On a stream transport (TCP) the framing layer copies the payload out of its internal buffer before delivering it (`StreamDecoder.next` slices the frame before returning it), so it is not overwritten by a later tick and does not need to be copied defensively by the caller.
+On a stream transport (TCP) the framing layer copies the payload out of its internal buffer before delivering it (`StreamDecoder.next` slices the frame before returning it), so a later tick never overwrites it and the caller does not need to copy it.
 On a packet transport (UDP) each received datagram is already a freshly allocated buffer, so the same guarantee holds without an extra copy.
 The implementation guide permits either this behavior or handing out a reference into a reused buffer, and requires the choice to be documented; this package always hands out an owned copy.
 
-## 11. Event and Status Types
+## 11. Event and status types
 
 | Type | Values |
 |---|---|
@@ -223,11 +222,11 @@ The implementation guide permits either this behavior or handing out a reference
 
 A session raises exactly one of `handshake-failed` or `disconnected` over its lifetime, never both, except a refusal a server sends, which carries the verdict frame and ends the session in the same reaction.
 `"local"` is part of the `DisconnectReason` union but is not produced by any code path in the current implementation; `close()` on a `Connection` or `Server` ends the session without raising a `disconnected` event for the side that called it.
-`send` returns `null` on success and one of the four `SendError` values otherwise; a value of `"congested"` means a previous frame is still queued for the transport and the new payload is refused rather than queued behind it, so memory does not grow unboundedly under backpressure.
+`send` returns `null` on success and one of the four `SendError` values otherwise; `"congested"` means a previous frame is still queued for the transport, so the new payload is refused and not queued behind it, and memory does not grow without bound under backpressure.
 
-## 12. Writing a Transport
+## 12. Writing a transport
 
-`Transport` (`src/transport.ts`) defines the entire contract a transport must implement: `send(bytes)`, `recv()`, `closeSoft()`, `closeHard()`, and a `kind` of `"stream"` or `"packet"`.
+`Transport` (`src/transport.ts`) is the whole contract a transport implements: `send(bytes)`, `recv()`, `closeSoft()`, `closeHard()`, and a `kind` of `"stream"` or `"packet"`.
 `Listener` defines `accept()`, `close()`, and `port`.
 
 | `SendResult` | Meaning |
@@ -240,7 +239,7 @@ A session raises exactly one of `handshake-failed` or `disconnected` over its li
 
 | `RecvResult["kind"]` | Meaning |
 |---|---|
-| `"received"` | A `Uint8Array` this call owns, for a packet transport exactly one whole packet, never a partial one |
+| `"received"` | A `Uint8Array` this call owns; for a packet transport, exactly one whole packet |
 | `"would-block"` | Nothing is available right now |
 | `"closed"` | The peer closed the connection |
 | `"error"` | The underlying link failed |
@@ -250,25 +249,25 @@ A session raises exactly one of `handshake-failed` or `disconnected` over its li
 A transport declaring `kind: "stream"` is wrapped by the `StreamDecoder` reassembly layer this package provides (`src/frame.ts`); a framing violation on a stream is fatal to the session, and the decoder stays poisoned afterward.
 A transport declaring `kind: "packet"` must deliver exactly one whole packet per call to `recv`; a framing violation on a packet transport costs only that packet, and the session continues.
 `TcpTransport`/`TcpListener` and `UdpTransport`/`UdpListener` (`src/transport/tcp.ts`, `src/transport/udp.ts`) are the two transports this package includes.
-The TCP transport keeps its socket in paused mode and reads with `socket.read()` inside `tick`; attaching a `data` listener instead would switch the socket into flowing mode and pull bytes into the heap as fast as the peer sends them, defeating TCP backpressure the moment the caller's loop fell behind.
+The TCP transport keeps its socket in paused mode and reads with `socket.read()` inside `tick`; a `data` listener would switch the socket into flowing mode and pull bytes into the heap as fast as the peer sends them, which would defeat TCP backpressure as soon as the caller's loop fell behind.
 
-## 13. Explicit Non-Goals
+## 13. Non-goals
 
-- **No codec.** The wire-format encoder/decoder of RFC-0002 is generated output from `fomoxac`. This package moves opaque bytes and never interprets one.
-- **No WebSocket, TLS, or QUIC transport**, and no extension point reserved for one. A transport for another protocol is implemented as a separate `Transport`, without modification to this package.
-- **No background threads and no `async` past connection setup.** Every socket operation is non-blocking, and the caller's `tick` call drives all I/O.
-- **No reconnection, no reordering, and no retransmission.** These behaviors are not part of the Fomoxa protocol; a transport that implemented them silently would cause the two ends to disagree about whether a session is still alive.
+- No codec. `fomoxac` generates the RFC-0002 wire-format encoder and decoder. This package moves opaque bytes and never interprets one.
+- No WebSocket, TLS, or QUIC transport, and no extension point reserved for one. A transport for another protocol is a separate `Transport`, written with no change to this package.
+- No background threads and no `async` past connection setup. Every socket operation is non-blocking, and the caller's `tick` call drives all I/O.
+- No reconnection, reordering, or retransmission. The Fomoxa protocol has none of these, and a transport that did them silently would leave the two ends disagreeing about whether a session is still alive.
 
 ## 14. Tests
 
-`npm test` runs `node --test "tests/*.test.ts"` directly against the TypeScript sources, with no build step, and the current suite reports 74 passing tests across six files.
+`npm test` runs `node --test "tests/*.test.ts"` directly against the TypeScript sources, with no build step. The suite has 74 tests across six files.
 
-- `tests/frame.test.ts` (10) — byte-exact frame layouts, a byte stream fed one byte at a time, several frames arriving in one chunk, a stream decoder poisoned permanently by a bad type byte, and the payload size ceiling.
-- `tests/handshake.test.ts` (17) — all branches of the fingerprint comparison (identical, shorter peer, longer peer, a message only one side knows), the query round in both directions, a field appended by the client and a field removed by the server (RFC-0003 §8.6 vectors V-001 and V-002), malformed hello and reply frames, and an oversized declared message count checked before any allocation.
-- `tests/session.test.ts` (17) — the client speaking first, a server accepting in one step, a refusal that both sends a verdict and ends the session, heartbeat behavior specific to each state, exactly one probe per silence window, and a full expiry cycle run without waiting on real time.
-- `tests/core.test.ts` (13) — a blocked transport retaining exactly one pending frame, congestion refused rather than queued, an oversized payload not ending the session, the per-tick frame budget, and exactly one terminal event per session.
-- `tests/tcp.test.ts` (7) — two peers reaching `ready` over a real socket, a message traveling once ready, the query round over a real connection, a genuine schema conflict refused on both ends, and a departed peer raising exactly one disconnect.
-- `tests/udp.test.ts` (10) — two peers reaching `ready` over real datagrams, a datagram from an unrecognized address ignored without harming the session, a frame past the datagram ceiling reported as `"too-large"` without ending the session, the incoming queue dropping the oldest datagram once full, and the tracked-peer ceiling holding under many unknown source addresses.
+- `tests/frame.test.ts` (10): byte-exact frame layouts, a byte stream fed one byte at a time, several frames arriving in one chunk, a stream decoder poisoned permanently by a bad type byte, and the payload size ceiling.
+- `tests/handshake.test.ts` (17): all branches of the fingerprint comparison (identical, shorter peer, longer peer, a message only one side knows), the query round in both directions, a field appended by the client and a field removed by the server (RFC-0003 §8.6 vectors V-001 and V-002), malformed hello and reply frames, and an oversized declared message count checked before any allocation.
+- `tests/session.test.ts` (17): the client speaking first, a server accepting in one step, a refusal that both sends a verdict and ends the session, heartbeat behavior specific to each state, exactly one probe per silence window, and a full expiry cycle run without waiting on real time.
+- `tests/core.test.ts` (13): a blocked transport retaining exactly one pending frame, congestion refused instead of queued, an oversized payload not ending the session, the per-tick frame budget, and exactly one terminal event per session.
+- `tests/tcp.test.ts` (7): two peers reaching `ready` over a real socket, a message traveling once ready, the query round over a real connection, a genuine schema conflict refused on both ends, and a departed peer raising exactly one disconnect.
+- `tests/udp.test.ts` (10): two peers reaching `ready` over real datagrams, a datagram from an unrecognized address ignored without harming the session, a frame past the datagram ceiling reported as `"too-large"` without ending the session, the incoming queue dropping the oldest datagram once full, and the tracked-peer ceiling holding under many unknown source addresses.
 
 ## 15. License
 
