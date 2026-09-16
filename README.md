@@ -40,17 +40,14 @@ No code in this repository inspects the content of a payload.
 
 ## 4. Installation
 
-This package is not currently published to the npm registry: a request to `https://registry.npmjs.org/@fomoxa/net` returns `404 Not Found`, and the CI workflow (`.github/workflows/ci.yml`) runs `npm test`, `npm run build`, and `npm run check:examples` with no `npm publish` step.
-To use it, build it from source and reference it as a local or git dependency.
+The package is published on npm as [`@fomoxa/net`](https://www.npmjs.com/package/@fomoxa/net).
 
 ```sh
-git clone https://github.com/fomoxa/typescript.git
-cd typescript
-npm install
-npm run build
+npm install @fomoxa/net
 ```
 
-`npm run build` runs `tsc` and emits compiled JavaScript with `.d.ts` declarations into `dist/`, per the `exports` field in `package.json`.
+The published package ships compiled JavaScript with `.d.ts` declarations under `dist/`, per the `exports` field in `package.json`; it declares no runtime dependency and requires Node.js 22 or newer.
+To build it from source instead, see [Section 5](#5-building-from-source).
 
 ### 4.1 ESM only
 
@@ -61,6 +58,8 @@ A CommonJS consumer must use `await import("@fomoxa/net")`, and under TypeScript
 ## 5. Building From Source
 
 ```sh
+git clone https://github.com/fomoxa/typescript.git
+cd typescript
 npm install
 npm test           # node --test "tests/*.test.ts", 74 tests, no build step
 npm run build       # tsc; emits dist/ with .d.ts
