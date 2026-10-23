@@ -144,8 +144,8 @@ const client = await connectUdpSession("127.0.0.1", 9321, SCHEMA);
 
 UDP does not guarantee delivery, ordering, or deduplication of datagrams, and this package adds none of these guarantees; datagrams reach the application in the order the socket received them.
 Heartbeat and dead-peer detection are unaffected, because elapsed time drives them and sequence numbers play no part.
-A single UDP datagram carries at most `MAX_DATAGRAM` (65,507) bytes of payload. A larger send is rejected with `"too-large"` without fragmenting it, and the session stays open.
-An endpoint queues at most `MAX_QUEUED_DATAGRAMS` (64) datagrams per peer, dropping the oldest once that fills, and tracks at most `MAX_TRACKED_PEERS` (1,024) distinct source addresses at once; a datagram from a new address past that limit is silently ignored.
+A single UDP datagram carries at most `MAX_DATAGRAM` (65,499) bytes of frame, which is 65,507 minus the 8-byte session identifier (`HEADER_LENGTH`) that starts every datagram. A larger send is rejected with `"too-large"` without fragmenting it, and the session stays open.
+An endpoint queues at most `MAX_QUEUED_DATAGRAMS` (64) datagrams per peer, dropping the oldest once that fills, and tracks at most `MAX_TRACKED_PEERS` (1,024) peers at once; a datagram that would create a peer past that limit is silently ignored. A peer is identified by its session identifier, so it keeps its session when its source address changes (`implementation-guide/en/03-udp-transport.md`).
 
 ## 7. Schema construction
 
@@ -267,7 +267,7 @@ The TCP transport keeps its socket in paused mode and reads with `socket.read()`
 - `tests/session.test.ts` (17): the client speaking first, a server accepting in one step, a refusal that both sends a verdict and ends the session, heartbeat behavior specific to each state, exactly one probe per silence window, and a full expiry cycle run without waiting on real time.
 - `tests/core.test.ts` (13): a blocked transport retaining exactly one pending frame, congestion refused instead of queued, an oversized payload not ending the session, the per-tick frame budget, and exactly one terminal event per session.
 - `tests/tcp.test.ts` (7): two peers reaching `ready` over a real socket, a message traveling once ready, the query round over a real connection, a genuine schema conflict refused on both ends, and a departed peer raising exactly one disconnect.
-- `tests/udp.test.ts` (10): two peers reaching `ready` over real datagrams, a datagram from an unrecognized address ignored without harming the session, a frame past the datagram ceiling reported as `"too-large"` without ending the session, the incoming queue dropping the oldest datagram once full, and the tracked-peer ceiling holding under many unknown source addresses.
+- `tests/udp.test.ts` (13): two peers reaching `ready` over real datagrams, a datagram from an unrecognized address ignored without harming the session, a frame past the datagram ceiling reported as `"too-large"` without ending the session, the incoming queue dropping the oldest datagram once full, and the tracked-peer ceiling holding under many unknown source addresses.
 
 ## 15. License
 

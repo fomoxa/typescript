@@ -10,6 +10,7 @@ import type { Event } from "../src/event.ts";
 import { buildSchema, type MessageSchema } from "../src/schema.ts";
 import { Server, type PeerEvent } from "../src/server.ts";
 import {
+    HEADER_LENGTH,
     MAX_DATAGRAM,
     MAX_QUEUED_DATAGRAMS,
     MAX_TRACKED_PEERS,
@@ -49,6 +50,23 @@ async function pump(
         await sleep(2);
     }
     return { server: serverEvents, client: clientEvents };
+}
+
+function datagram(session: bigint, ...frame: number[]): Uint8Array {
+    const bytes = new Uint8Array(HEADER_LENGTH + frame.length);
+    new DataView(bytes.buffer).setBigUint64(0, session, true);
+    bytes.set(frame, HEADER_LENGTH);
+    return bytes;
+}
+
+async function boundSocket(): Promise<dgram.Socket> {
+    const socket = dgram.createSocket("udp4");
+    await new Promise<void>((resolve) => socket.bind(0, "127.0.0.1", resolve));
+    return socket;
+}
+
+function nextDatagram(socket: dgram.Socket): Promise<Uint8Array> {
+    return new Promise((resolve) => socket.once("message", (data) => resolve(new Uint8Array(data))));
 }
 
 const kinds = (events: readonly { kind: string }[]) => events.map((event) => event.kind);
@@ -173,7 +191,7 @@ test("a malformed datagram is dropped without killing the session (02 §2.6)", a
         // the one datagram is dropped and the session carries on.
         const injector = dgram.createSocket("udp4");
         await new Promise<void>((resolve) => injector.bind(0, "127.0.0.1", resolve));
-        injector.send(new Uint8Array([0x09, 0x09]), server.port, "127.0.0.1");
+        injector.send(datagram(0n, 0x09, 0x09), server.port, "127.0.0.1");
         await sleep(20);
 
         const seen = await pump(server, client, () => false, 20);
@@ -201,7 +219,7 @@ test("the peer table is bounded, so spoofed sources cannot grow it forever", asy
         for (let index = 0; index < 12; index += 1) {
             const socket = dgram.createSocket("udp4");
             await new Promise<void>((resolve) => socket.bind(0, "127.0.0.1", resolve));
-            socket.send(new Uint8Array([1]), listener.port, "127.0.0.1");
+            socket.send(datagram(0n, 1), listener.port, "127.0.0.1");
             shouters.push(socket);
         }
         await sleep(40);
@@ -213,5 +231,102 @@ test("the peer table is bounded, so spoofed sources cannot grow it forever", asy
         }
     } finally {
         listener.close();
+    }
+});
+
+test("a peer keeps its session when its source address changes", async () => {
+    const listener = await listenUdp("127.0.0.1", 0);
+    const before = await boundSocket();
+    const after = await boundSocket();
+    try {
+        before.send(datagram(0n, 1, 2), listener.port, "127.0.0.1");
+        await sleep(30);
+        const peer = listener.accept() as UdpTransport;
+        assert.notEqual(peer, null);
+        assert.notEqual(peer.session, 0n, "the server assigned a non-zero id");
+        const first = peer.recv();
+        assert.deepEqual(Array.from((first as { bytes: Uint8Array }).bytes), [1, 2]);
+
+        const reply = nextDatagram(before);
+        assert.equal(peer.send(new Uint8Array([9])), "sent");
+        const echoed = await reply;
+        assert.equal(echoed.length, HEADER_LENGTH + 1);
+        assert.equal(new DataView(echoed.buffer).getBigUint64(0, true), peer.session);
+
+        after.send(datagram(peer.session, 3), listener.port, "127.0.0.1");
+        await sleep(30);
+        assert.equal(peer.port, after.address().port, "the peer moved to the new address");
+        assert.deepEqual(Array.from((peer.recv() as { bytes: Uint8Array }).bytes), [3]);
+
+        const moved = nextDatagram(after);
+        assert.equal(peer.send(new Uint8Array([10])), "sent");
+        await moved;
+    } finally {
+        before.close();
+        after.close();
+        listener.close();
+    }
+});
+
+test("unknown ids and short datagrams reach nobody, and no peer moves onto a taken address", async () => {
+    const listener = await listenUdp("127.0.0.1", 0);
+    const first = await boundSocket();
+    const second = await boundSocket();
+    try {
+        first.send(datagram(0n, 1), listener.port, "127.0.0.1");
+        await sleep(30);
+        const peer = listener.accept() as UdpTransport;
+        peer.recv();
+        const home = peer.port;
+
+        first.send(new Uint8Array(HEADER_LENGTH), listener.port, "127.0.0.1");
+        second.send(datagram(peer.session ^ 1n, 5), listener.port, "127.0.0.1");
+        await sleep(30);
+        assert.equal(peer.recv().kind, "would-block", "dropped datagrams reach nobody");
+        assert.equal(peer.port, home, "an unknown id does not move a peer");
+
+        second.send(datagram(0n, 6), listener.port, "127.0.0.1");
+        await sleep(30);
+        const other = listener.accept() as UdpTransport;
+        other.recv();
+        const taken = other.port;
+
+        first.send(datagram(other.session, 7), listener.port, "127.0.0.1");
+        await sleep(30);
+        assert.equal(other.port, taken, "a peer is not moved onto an address another peer holds");
+        assert.equal(peer.port, home);
+    } finally {
+        first.close();
+        second.close();
+        listener.close();
+    }
+});
+
+test("a client sends zero first and keeps the first id it receives", async () => {
+    const server = await boundSocket();
+    const client = await connectUdp("127.0.0.1", server.address().port);
+    try {
+        const request = new Promise<{ data: Uint8Array; port: number }>((resolve) => {
+            server.once("message", (data, info) => resolve({ data: new Uint8Array(data), port: info.port }));
+        });
+        assert.equal(client.send(new Uint8Array([1])), "sent");
+        const sent = await request;
+        assert.equal(new DataView(sent.data.buffer, sent.data.byteOffset).getBigUint64(0, true), 0n);
+
+        server.send(datagram(0n, 2), sent.port, "127.0.0.1");
+        server.send(datagram(11n, 3), sent.port, "127.0.0.1");
+        server.send(datagram(22n, 4), sent.port, "127.0.0.1");
+        await sleep(30);
+
+        assert.deepEqual(Array.from((client.recv() as { bytes: Uint8Array }).bytes), [3]);
+        assert.equal(client.recv().kind, "would-block", "a frame with another id was dropped");
+
+        const next = nextDatagram(server);
+        client.send(new Uint8Array([8]));
+        const final = await next;
+        assert.equal(new DataView(final.buffer, final.byteOffset).getBigUint64(0, true), 11n);
+    } finally {
+        client.closeHard();
+        server.close();
     }
 });

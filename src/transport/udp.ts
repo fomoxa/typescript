@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import dgram from "node:dgram";
 
 import {
@@ -12,12 +13,17 @@ import {
 } from "../transport.ts";
 
 /**
- * The largest payload an IPv4 datagram can carry. 01 §7 calls this the
- * absolute ceiling and advises applications to stay well under ~1200 bytes so
- * the IP layer never fragments — that advice belongs to the application, so it
- * is documented rather than enforced here.
+ * The session identifier at the start of every datagram (03 §2).
  */
-export const MAX_DATAGRAM = 65507;
+export const HEADER_LENGTH = 8;
+
+/**
+ * The largest frame an IPv4 datagram can carry once the header is counted.
+ * 01 §7 calls the datagram size the absolute ceiling and advises applications
+ * to stay well under ~1200 bytes so the IP layer never fragments — that advice
+ * belongs to the application, so it is documented rather than enforced here.
+ */
+export const MAX_DATAGRAM = 65507 - HEADER_LENGTH;
 
 /**
  * How many datagrams may wait for one peer before the oldest is dropped.
@@ -49,10 +55,22 @@ interface Channel {
     detach(peer: UdpTransport): void;
 }
 
+function writeHeader(frame: Uint8Array, session: bigint): Uint8Array {
+    const datagram = new Uint8Array(HEADER_LENGTH + frame.length);
+    new DataView(datagram.buffer).setBigUint64(0, session, true);
+    datagram.set(frame, HEADER_LENGTH);
+    return datagram;
+}
+
+function readHeader(datagram: Uint8Array): bigint {
+    return new DataView(datagram.buffer, datagram.byteOffset, datagram.byteLength).getBigUint64(0, true);
+}
+
 export class UdpTransport implements Transport {
     readonly kind: TransportKind = "packet";
-    readonly address: string;
-    readonly port: number;
+    address: string;
+    port: number;
+    session: bigint;
 
     private readonly channel: Channel;
     private readonly queue: Uint8Array[] = [];
@@ -60,10 +78,11 @@ export class UdpTransport implements Transport {
     private closed = false;
     private dropped = 0;
 
-    constructor(channel: Channel, address: string, port: number) {
+    constructor(channel: Channel, address: string, port: number, session = 0n) {
         this.channel = channel;
         this.address = address;
         this.port = port;
+        this.session = session;
     }
 
     /** How many datagrams the bound above has discarded, for diagnostics. */
@@ -99,7 +118,7 @@ export class UdpTransport implements Transport {
         if (bytes.length > MAX_DATAGRAM) {
             return "too-large";
         }
-        return this.channel.dispatch(bytes, this.port, this.address);
+        return this.channel.dispatch(writeHeader(bytes, this.session), this.port, this.address);
     }
 
     recv(): RecvResult {
@@ -148,6 +167,7 @@ export class UdpListener implements Listener {
 
     private readonly socket: dgram.Socket;
     private readonly peers = new Map<string, UdpTransport>();
+    private readonly sessions = new Map<bigint, UdpTransport>();
     private readonly waiting: UdpTransport[] = [];
     private closed = false;
     private ignored = 0;
@@ -160,18 +180,41 @@ export class UdpListener implements Listener {
             if (this.closed) {
                 return;
             }
+            if (data.length <= HEADER_LENGTH) {
+                return;
+            }
+            const datagram = new Uint8Array(data);
+            const session = readHeader(datagram);
             const key = keyOf(info.address, info.port);
-            let peer = this.peers.get(key);
-            if (peer === undefined) {
-                if (this.peers.size >= MAX_TRACKED_PEERS) {
-                    this.ignored += 1;
+            let peer: UdpTransport | undefined;
+            if (session !== 0n) {
+                peer = this.sessions.get(session);
+                if (peer === undefined) {
                     return;
                 }
-                peer = new UdpTransport(this.channel(), info.address, info.port);
-                this.peers.set(key, peer);
-                this.waiting.push(peer);
+                if (keyOf(peer.address, peer.port) !== key) {
+                    if (this.peers.has(key)) {
+                        return;
+                    }
+                    this.peers.delete(keyOf(peer.address, peer.port));
+                    peer.address = info.address;
+                    peer.port = info.port;
+                    this.peers.set(key, peer);
+                }
+            } else {
+                peer = this.peers.get(key);
+                if (peer === undefined) {
+                    if (this.peers.size >= MAX_TRACKED_PEERS) {
+                        this.ignored += 1;
+                        return;
+                    }
+                    peer = new UdpTransport(this.channel(), info.address, info.port, this.newSession());
+                    this.peers.set(key, peer);
+                    this.sessions.set(peer.session, peer);
+                    this.waiting.push(peer);
+                }
             }
-            peer.deliver(new Uint8Array(data));
+            peer.deliver(datagram.subarray(HEADER_LENGTH));
         });
 
         socket.on("error", () => {
@@ -202,7 +245,17 @@ export class UdpListener implements Listener {
         this.closed = true;
         this.waiting.length = 0;
         this.peers.clear();
+        this.sessions.clear();
         this.socket.close();
+    }
+
+    private newSession(): bigint {
+        for (;;) {
+            const candidate = randomBytes(HEADER_LENGTH).readBigUInt64LE(0);
+            if (candidate !== 0n && !this.sessions.has(candidate)) {
+                return candidate;
+            }
+        }
     }
 
     private channel(): Channel {
@@ -220,6 +273,7 @@ export class UdpListener implements Listener {
             },
             detach: (peer) => {
                 this.peers.delete(keyOf(peer.address, peer.port));
+                this.sessions.delete(peer.session);
             },
         };
     }
@@ -261,7 +315,16 @@ export function connectUdp(host: string, port: number): Promise<UdpTransport> {
                 if (info.address !== remote.address || info.port !== remote.port) {
                     return;
                 }
-                transport.deliver(new Uint8Array(data));
+                if (data.length <= HEADER_LENGTH) {
+                    return;
+                }
+                const datagram = new Uint8Array(data);
+                const received = readHeader(datagram);
+                if (received === 0n || (transport.session !== 0n && received !== transport.session)) {
+                    return;
+                }
+                transport.session = received;
+                transport.deliver(datagram.subarray(HEADER_LENGTH));
             });
             socket.on("error", () => {
                 transport.fail();
