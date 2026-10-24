@@ -173,3 +173,74 @@ test("a peer that goes away raises exactly one disconnect", async () => {
         server.close();
     }
 });
+
+test("after a peer in the middle leaves, a send by id still reaches the right peer", async () => {
+    const server = await listen("127.0.0.1", 0, SCHEMA, CONFIG);
+    const clients: Connection[] = [];
+    for (let index = 0; index < 3; index += 1) {
+        clients.push(await connect("127.0.0.1", server.port, SCHEMA, CONFIG));
+    }
+
+    async function tickAll(done: () => boolean): Promise<void> {
+        for (let round = 0; round < 300 && !done(); round += 1) {
+            const now = nowMs();
+            server.tick(now);
+            for (const client of clients) {
+                client.tick(now);
+            }
+            await sleep(2);
+        }
+    }
+
+    async function receiveOne(client: Connection): Promise<number[]> {
+        const received: number[][] = [];
+        for (let round = 0; round < 300 && received.length === 0; round += 1) {
+            const now = nowMs();
+            server.tick(now);
+            for (const event of client.tick(now)) {
+                if (event.kind === "message") {
+                    received.push(Array.from(event.payload));
+                }
+            }
+            await sleep(2);
+        }
+        assert.equal(received.length, 1, "the client got one message");
+        return received[0];
+    }
+
+    try {
+        const readyPeers = () => server.peers().filter((peer) => server.isPeerReady(peer)).length;
+        await tickAll(() => readyPeers() === 3 && clients.every((client) => client.isReady));
+        assert.equal(readyPeers(), 3);
+
+        const ids = server.peers();
+        for (const id of ids) {
+            assert.equal(server.send(id, 7, new Uint8Array([id])), null);
+        }
+        const idOfClient: number[] = [];
+        for (const client of clients) {
+            idOfClient.push((await receiveOne(client))[0]);
+        }
+
+        const leaving = ids[1];
+        const leavingClient = idOfClient.indexOf(leaving);
+        clients.splice(leavingClient, 1)[0].destroy();
+        const remainingIds = idOfClient.filter((id) => id !== leaving);
+
+        await tickAll(() => server.peerCount === 2);
+        assert.equal(server.peerCount, 2);
+        assert.equal(server.send(leaving, 7, new Uint8Array([0])), "closed");
+
+        for (let index = clients.length - 1; index >= 0; index -= 1) {
+            assert.equal(server.send(remainingIds[index], 7, new Uint8Array([0x80 | index])), null);
+        }
+        for (let index = 0; index < clients.length; index += 1) {
+            assert.deepEqual(await receiveOne(clients[index]), [0x80 | index]);
+        }
+    } finally {
+        for (const client of clients) {
+            client.destroy();
+        }
+        server.close();
+    }
+});

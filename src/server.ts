@@ -22,6 +22,7 @@ export class Server {
     private readonly schema: Schema;
     private readonly config: Config;
     private readonly slots: Slot[] = [];
+    private readonly slotsById = new Map<PeerId, Slot>();
     private nextId: PeerId = 1;
     private closed = false;
 
@@ -57,7 +58,9 @@ export class Server {
             }
             const id = this.nextId;
             this.nextId += 1;
-            this.slots.push({ id, core: new Core("server", transport, this.schema, this.config, now) });
+            const slot = { id, core: new Core("server", transport, this.schema, this.config, now) };
+            this.slots.push(slot);
+            this.slotsById.set(id, slot);
         }
 
         for (let index = this.slots.length - 1; index >= 0; index -= 1) {
@@ -68,6 +71,7 @@ export class Server {
             if (slot.core.session.currentState === "closed") {
                 slot.core.release();
                 this.slots.splice(index, 1);
+                this.slotsById.delete(slot.id);
             }
         }
 
@@ -98,11 +102,12 @@ export class Server {
             slot.core.close();
             slot.core.release();
         }
+        this.slotsById.clear();
         this.listener.close();
     }
 
     private slotOf(peer: PeerId): Slot | undefined {
-        return this.slots.find((slot) => slot.id === peer);
+        return this.slotsById.get(peer);
     }
 }
 
