@@ -61,7 +61,7 @@ A CommonJS consumer must use `await import("@fomoxa/net")`, and under TypeScript
 git clone https://github.com/fomoxa/typescript.git
 cd typescript
 npm install
-npm test           # node --test "tests/*.test.ts", 74 tests, no build step
+npm test           # node --test "tests/*.test.ts", 104 tests, no build step
 npm run build       # tsc; emits dist/ with .d.ts
 npm run check:examples
 ```
@@ -146,6 +146,8 @@ UDP does not guarantee delivery, ordering, or deduplication of datagrams, and th
 Heartbeat and dead-peer detection are unaffected, because elapsed time drives them and sequence numbers play no part.
 A single UDP datagram carries at most `MAX_DATAGRAM` (65,499) bytes of frame, which is 65,507 minus the 8-byte session identifier (`HEADER_LENGTH`) that starts every datagram. A larger send is rejected with `"too-large"` without fragmenting it, and the session stays open.
 An endpoint queues at most `MAX_QUEUED_DATAGRAMS` (64) datagrams per peer, dropping the oldest once that fills, and tracks at most `MAX_TRACKED_PEERS` (1,024) peers at once; a datagram that would create a peer past that limit is silently ignored. A peer is identified by its session identifier, so it keeps its session when its source address changes (`implementation-guide/en/03-udp-transport.md`).
+
+A handshake payload whose HANDSHAKE frame would be longer than 900 bytes goes out over UDP as HANDSHAKE PART frames, one per datagram (`implementation-guide/en/02-flows.md` §2.8); a hello splits from 63 messages on. The receiver places the parts by index, in any order, and fails the handshake as malformed when a part breaks the rules of §2.8. These parts do not count toward the limit on frames waiting for a blocked socket. Over TCP every handshake payload stays one HANDSHAKE frame.
 
 ## 7. Schema construction
 
@@ -260,13 +262,14 @@ The TCP transport keeps its socket in paused mode and reads with `socket.read()`
 
 ## 14. Tests
 
-`npm test` runs `node --test "tests/*.test.ts"` directly against the TypeScript sources, with no build step. The suite has 74 tests across six files.
+`npm test` runs `node --test "tests/*.test.ts"` directly against the TypeScript sources, with no build step. The suite has 104 tests across seven files.
 
 - `tests/frame.test.ts` (10): byte-exact frame layouts, a byte stream fed one byte at a time, several frames arriving in one chunk, a stream decoder poisoned permanently by a bad type byte, and the payload size ceiling.
 - `tests/handshake.test.ts` (17): all branches of the fingerprint comparison (identical, shorter peer, longer peer, a message only one side knows), the query round in both directions, a field appended by the client and a field removed by the server (RFC-0003 §8.6 vectors V-001 and V-002), malformed hello and reply frames, and an oversized declared message count checked before any allocation.
+- `tests/handshake-part.test.ts` (26): the split at 63 messages, the part layout, parts of at most 900 bytes, a stream transport keeping one frame, assembly in reverse order and with a repeated part, each way a set of parts can fail the handshake, a part after the verdict, a part on a byte stream, a query round in parts, parts held by a blocked transport leaving as separate packets, a hello of more parts than the outbox limit, and a 300-message handshake over real datagrams.
 - `tests/session.test.ts` (17): the client speaking first, a server accepting in one step, a refusal that both sends a verdict and ends the session, heartbeat behavior specific to each state, exactly one probe per silence window, and a full expiry cycle run without waiting on real time.
 - `tests/core.test.ts` (13): a blocked transport retaining exactly one pending frame, congestion refused instead of queued, an oversized payload not ending the session, the per-tick frame budget, and exactly one terminal event per session.
-- `tests/tcp.test.ts` (7): two peers reaching `ready` over a real socket, a message traveling once ready, the query round over a real connection, a genuine schema conflict refused on both ends, and a departed peer raising exactly one disconnect.
+- `tests/tcp.test.ts` (8): two peers reaching `ready` over a real socket, a message traveling once ready, the query round over a real connection, a genuine schema conflict refused on both ends, and a departed peer raising exactly one disconnect.
 - `tests/udp.test.ts` (13): two peers reaching `ready` over real datagrams, a datagram from an unrecognized address ignored without harming the session, a frame past the datagram ceiling reported as `"too-large"` without ending the session, the incoming queue dropping the oldest datagram once full, and the tracked-peer ceiling holding under many unknown source addresses.
 
 ## 15. License

@@ -2,15 +2,21 @@ export const FRAME_DATA = 0;
 export const FRAME_PROBE = 1;
 export const FRAME_ACK = 2;
 export const FRAME_HANDSHAKE = 3;
+export const FRAME_HANDSHAKE_PART = 4;
 
 export const MAGIC_C = 0x43;
 export const MAGIC_Y = 0x59;
 
 export const DATA_HEADER_LEN = 11;
 export const HANDSHAKE_HEADER_LEN = 5;
+export const PART_HEADER_LEN = 9;
 
 export const MAX_MESSAGE_PAYLOAD = 16 * 1024 * 1024;
 export const MAX_HANDSHAKE_PAYLOAD = 1 * 1024 * 1024;
+
+export const PACKET_HANDSHAKE_BUDGET = 900;
+export const PART_CONTENT_LEN = PACKET_HANDSHAKE_BUDGET - PART_HEADER_LEN;
+export const MAX_HANDSHAKE_PARTS = Math.ceil(MAX_HANDSHAKE_PAYLOAD / PART_CONTENT_LEN);
 
 export type FrameError =
     | "incomplete"
@@ -18,6 +24,8 @@ export type FrameError =
     | "bad-magic"
     | "message-too-large"
     | "handshake-too-large"
+    | "part-too-large"
+    | "part-on-stream"
     | "truncated"
     | "trailing";
 
@@ -70,6 +78,27 @@ export function encodeHandshake(payload: Uint8Array): Uint8Array {
     view.setUint32(1, payload.length, true);
     out.set(payload, HANDSHAKE_HEADER_LEN);
     return out;
+}
+
+export function encodePart(index: number, count: number, content: Uint8Array): Uint8Array {
+    const out = new Uint8Array(PART_HEADER_LEN + content.length);
+    const view = new DataView(out.buffer);
+    out[0] = FRAME_HANDSHAKE_PART;
+    view.setUint16(1, index, true);
+    view.setUint16(3, count, true);
+    view.setUint32(5, content.length, true);
+    out.set(content, PART_HEADER_LEN);
+    return out;
+}
+
+export function encodeParts(payload: Uint8Array): Uint8Array[] {
+    const count = Math.ceil(payload.length / PART_CONTENT_LEN);
+    const parts: Uint8Array[] = [];
+    for (let index = 0; index < count; index += 1) {
+        const offset = index * PART_CONTENT_LEN;
+        parts.push(encodePart(index, count, payload.subarray(offset, offset + PART_CONTENT_LEN)));
+    }
+    return parts;
 }
 
 export function encodeProbe(): Uint8Array {
@@ -148,6 +177,28 @@ export function decodeFrame(bytes: Uint8Array, maxMessageBytes: number): Decoded
             };
         }
 
+        case FRAME_HANDSHAKE_PART: {
+            if (bytes.length < PART_HEADER_LEN) {
+                throw new FrameFormatError("incomplete");
+            }
+            const length = view.getUint32(5, true);
+            if (length > PART_CONTENT_LEN) {
+                throw new FrameFormatError("part-too-large");
+            }
+            const total = PART_HEADER_LEN + length;
+            if (bytes.length < total) {
+                throw new FrameFormatError("incomplete");
+            }
+            return {
+                frame: {
+                    type: FRAME_HANDSHAKE_PART,
+                    messageId: 0,
+                    payload: bytes.subarray(1, total),
+                },
+                used: total,
+            };
+        }
+
         default:
             throw new FrameFormatError("unknown-type");
     }
@@ -198,6 +249,10 @@ export class StreamDecoder {
         }
         if (this.buffer.length === 0) {
             return null;
+        }
+        if (this.buffer[0] === FRAME_HANDSHAKE_PART) {
+            this.poison = new FrameFormatError("part-on-stream");
+            throw this.poison;
         }
         let decoded: DecodedFrame;
         try {

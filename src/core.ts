@@ -1,12 +1,17 @@
+import { HandshakeAssembler } from "./assembler.ts";
 import type { Config } from "./config.ts";
 import type { DisconnectReason, Event } from "./event.ts";
 import {
+    FRAME_HANDSHAKE,
+    FRAME_HANDSHAKE_PART,
     FrameFormatError,
+    PACKET_HANDSHAKE_BUDGET,
     StreamDecoder,
     decodePacket,
     encodeAck,
     encodeData,
     encodeHandshake,
+    encodeParts,
     encodeProbe,
     type Frame,
 } from "./frame.ts";
@@ -30,6 +35,13 @@ type Intake =
     | { readonly kind: "stream"; readonly decoder: StreamDecoder }
     | { readonly kind: "packet" };
 
+interface Pending {
+    readonly bytes: Uint8Array;
+    readonly counted: boolean;
+}
+
+const NO_PAYLOAD = new Uint8Array(0);
+
 export class Core {
     readonly session: Session;
 
@@ -51,7 +63,9 @@ export class Core {
      * violation of that assumption into a dead session rather than unbounded
      * memory. Worth confirming against the guide's author.
      */
-    private outbox: Uint8Array[] = [];
+    private outbox: Pending[] = [];
+    private countedFrames = 0;
+    private readonly parts = new HandshakeAssembler();
     /** Frames already lifted out of the framing layer but not yet handed to the
      *  session, because the tick budget ran out. Data the core stopped short of
      *  is never dropped — it waits for the next tick (01 §6). */
@@ -105,7 +119,8 @@ export class Core {
             case "would-block":
                 // ⏸ keeps the frame for the next tick and still reports success
                 // upward: the application is never blocked.
-                this.outbox.push(frame);
+                this.outbox.push({ bytes: frame, counted: true });
+                this.countedFrames += 1;
                 return null;
             case "too-large":
                 // ⊘ does not end the session and is never retried (01 §7).
@@ -132,9 +147,12 @@ export class Core {
         // A new frame reaching the wire ahead of the remains of an old one
         // corrupts the peer's decoder permanently (02 §5.3).
         while (this.outbox.length > 0 && this.dead === null) {
-            const result = this.transport.send(this.outbox[0]);
+            const result = this.transport.send(this.outbox[0].bytes);
             if (result === "sent") {
-                this.outbox.shift();
+                const sent = this.outbox.shift() as Pending;
+                if (sent.counted) {
+                    this.countedFrames -= 1;
+                }
                 continue;
             }
             if (result === "would-block") {
@@ -196,7 +214,7 @@ export class Core {
             }
 
             const frame = this.ready.shift() as Frame;
-            this.apply(this.session.onFrame(frame, now), events);
+            this.apply(this.handle(frame, now), events);
             budget -= 1;
         }
     }
@@ -247,6 +265,38 @@ export class Core {
         return frames;
     }
 
+    private handle(frame: Frame, now: number): Reaction {
+        if (frame.type === FRAME_HANDSHAKE_PART) {
+            return this.handlePart(frame, now);
+        }
+        if (frame.type === FRAME_HANDSHAKE && this.parts.pending) {
+            this.parts.reset();
+            return this.session.onFrame({ type: FRAME_HANDSHAKE, messageId: 0, payload: NO_PAYLOAD }, now);
+        }
+        return this.session.onFrame(frame, now);
+    }
+
+    private handlePart(frame: Frame, now: number): Reaction {
+        if (this.session.currentState !== "handshaking") {
+            return {};
+        }
+        switch (this.parts.add(frame.payload)) {
+            case "pending":
+                return this.session.onFrame(frame, now);
+            case "complete": {
+                const reaction = this.session.onFrame(
+                    { type: FRAME_HANDSHAKE, messageId: 0, payload: this.parts.body },
+                    now,
+                );
+                this.parts.reset();
+                return reaction;
+            }
+            default:
+                this.parts.reset();
+                return this.session.onFrame({ type: FRAME_HANDSHAKE, messageId: 0, payload: NO_PAYLOAD }, now);
+        }
+    }
+
     private apply(reaction: Reaction, events: Event[]): void {
         if (reaction.out !== undefined) {
             this.write(reaction.out);
@@ -268,16 +318,29 @@ export class Core {
                   ? encodeAck()
                   : encodeHandshake(out.payload);
 
+        if (out.kind === "handshake" && this.intake.kind === "packet" && bytes.length > PACKET_HANDSHAKE_BUDGET) {
+            for (const part of encodeParts(out.payload)) {
+                if (this.dead !== null) {
+                    return;
+                }
+                this.put(part, false);
+            }
+            return;
+        }
+        this.put(bytes, true);
+    }
+
+    private put(bytes: Uint8Array, counted: boolean): void {
         // Wire order is absolute: once anything is waiting, everything queues
         // behind it rather than overtaking it (02 §5.3).
         if (this.outbox.length > 0) {
-            this.queue(bytes);
+            this.queue(bytes, counted);
             return;
         }
 
         const result = this.transport.send(bytes);
         if (result === "would-block") {
-            this.queue(bytes);
+            this.queue(bytes, counted);
         } else if (result === "closed") {
             this.dead = "peer-closed";
         } else if (result === "error" || result === "too-large") {
@@ -285,14 +348,17 @@ export class Core {
         }
     }
 
-    private queue(bytes: Uint8Array): void {
-        if (this.outbox.length >= MAX_OUTBOX_FRAMES) {
+    private queue(bytes: Uint8Array, counted: boolean): void {
+        if (counted && this.countedFrames >= MAX_OUTBOX_FRAMES) {
             // The peer stopped reading, which is the same "not keeping up" a
             // heartbeat timeout reports. The transport itself is fine, so
             // calling this a transport error would be untrue.
             this.dead = "unresponsive";
             return;
         }
-        this.outbox.push(bytes);
+        this.outbox.push({ bytes, counted });
+        if (counted) {
+            this.countedFrames += 1;
+        }
     }
 }
